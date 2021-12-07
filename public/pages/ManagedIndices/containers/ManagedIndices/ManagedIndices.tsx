@@ -6,7 +6,6 @@
 import React, { Component } from "react";
 import { RouteComponentProps } from "react-router-dom";
 import {
-  EuiBasicTable,
   EuiHorizontalRule,
   EuiLink,
   EuiFlexGroup,
@@ -15,23 +14,20 @@ import {
   EuiTitle,
   EuiSpacer,
   EuiTableFieldDataColumnType,
-  // @ts-ignore
-  Criteria,
   EuiTableSortingType,
   Direction,
   // @ts-ignore
   Pagination,
   EuiTableSelectionType,
-  ArgsWithQuery,
-  ArgsWithError,
   Query,
+  EuiInMemoryTable,
 } from "@elastic/eui";
 import queryString from "query-string";
 import _ from "lodash";
 import { ContentPanel, ContentPanelActions } from "../../../../components/ContentPanel";
 import ManagedIndexControls from "../../components/ManagedIndexControls";
 import ManagedIndexEmptyPrompt from "../../components/ManagedIndexEmptyPrompt";
-import { DEFAULT_PAGE_SIZE_OPTIONS, DEFAULT_QUERY_PARAMS } from "../../utils/constants";
+import { DEFAULT_PAGE_SIZE_OPTIONS, DEFAULT_QUERY_PARAMS, SEARCH_SCHEMA } from "../../utils/constants";
 import { BREADCRUMBS, DEFAULT_EMPTY_DATA, PLUGIN_NAME, ROUTES } from "../../../../utils/constants";
 import InfoModal from "../../components/InfoModal";
 import PolicyModal from "../../../../components/PolicyModal";
@@ -56,10 +52,8 @@ interface ManagedIndicesProps extends RouteComponentProps {
 
 interface ManagedIndicesState {
   totalManagedIndices: number;
-  from: number;
-  size: number;
   search: string;
-  query: Query;
+  query: Query | null;
   sortField: keyof ManagedIndexItem;
   sortDirection: Direction;
   selectedItems: ManagedIndexItem[];
@@ -76,12 +70,10 @@ export default class ManagedIndices extends Component<ManagedIndicesProps, Manag
   constructor(props: ManagedIndicesProps) {
     super(props);
 
-    const { from, size, search, sortField, sortDirection, showDataStreams } = getURLQueryParams(this.props.location);
+    const { search, sortField, sortDirection, showDataStreams } = getURLQueryParams(this.props.location);
 
     this.state = {
       totalManagedIndices: 0,
-      from,
-      size,
       search,
       query: Query.parse(search),
       sortField,
@@ -192,8 +184,15 @@ export default class ManagedIndices extends Component<ManagedIndicesProps, Manag
     }
   }
 
-  static getQueryObjectFromState({ from, size, search, sortField, sortDirection, showDataStreams }: ManagedIndicesState) {
-    return { from, size, search, sortField, sortDirection, showDataStreams };
+  static getQueryObjectFromState({ search, sortField, sortDirection, showDataStreams }: ManagedIndicesState) {
+    return {
+      from: 0,
+      size: 10000,
+      search,
+      sortField,
+      sortDirection,
+      showDataStreams,
+    };
   }
 
   renderPolicyId = (policyId: string, item: ManagedIndexItem) => {
@@ -304,22 +303,8 @@ export default class ManagedIndices extends Component<ManagedIndicesProps, Manag
     }
   };
 
-  onTableChange = ({ page: tablePage, sort }: Criteria<ManagedIndexItem>): void => {
-    const { index: page, size } = tablePage;
-    const { field: sortField, direction: sortDirection } = sort;
-    this.setState({ from: page * size, size, sortField, sortDirection });
-  };
-
   onSelectionChange = (selectedItems: ManagedIndexItem[]): void => {
     this.setState({ selectedItems });
-  };
-
-  onSearchChange = ({ query, queryText, error }: ArgsWithQuery | ArgsWithError): void => {
-    if (error) {
-      return;
-    }
-
-    this.setState({ from: 0, search: queryText, query });
   };
 
   onClickModalEdit = (item: ManagedIndexItem, onClose: () => void): void => {
@@ -335,8 +320,6 @@ export default class ManagedIndices extends Component<ManagedIndicesProps, Manag
   render() {
     const {
       totalManagedIndices,
-      from,
-      size,
       search,
       sortField,
       sortDirection,
@@ -348,11 +331,9 @@ export default class ManagedIndices extends Component<ManagedIndicesProps, Manag
     } = this.state;
 
     const filterIsApplied = !!search;
-    const page = Math.floor(from / size);
 
     const pagination: Pagination = {
-      pageIndex: page,
-      pageSize: size,
+      initialPageSize: 20,
       pageSizeOptions: DEFAULT_PAGE_SIZE_OPTIONS,
       totalItemCount: totalManagedIndices,
     };
@@ -420,6 +401,31 @@ export default class ManagedIndices extends Component<ManagedIndicesProps, Manag
       },
     ];
 
+    const searchControl = {
+      toolsRight: (
+        <ManagedIndexControls
+          onRefresh={this.getManagedIndices}
+          showDataStreams={showDataStreams}
+          getDataStreams={this.getDataStreams}
+          toggleShowDataStreams={this.toggleShowDataStreams}
+        />
+      ),
+      box: { placeholder: "Search index name", SEARCH_SCHEMA, incremental: true },
+      filters: showDataStreams
+        ? [
+            {
+              type: "field_value_selection",
+              field: "data_streams",
+              name: "Data streams",
+              noOptionsMessage: "No data streams found",
+              multiSelect: false,
+              cache: 60000,
+              options: () => this.getDataStreams(),
+            },
+          ]
+        : undefined,
+    };
+
     return (
       <div style={{ padding: "0px 25px" }}>
         <EuiFlexGroup alignItems="center">
@@ -438,18 +444,7 @@ export default class ManagedIndices extends Component<ManagedIndicesProps, Manag
         <EuiSpacer />
 
         <ContentPanel actions={<ContentPanelActions actions={actions} />} bodyStyles={{ padding: "initial" }} title="Indices">
-          <ManagedIndexControls
-            search={search}
-            onSearchChange={this.onSearchChange}
-            onRefresh={this.getManagedIndices}
-            showDataStreams={showDataStreams}
-            getDataStreams={this.getDataStreams}
-            toggleShowDataStreams={this.toggleShowDataStreams}
-          />
-
-          <EuiHorizontalRule margin="xs" />
-
-          <EuiBasicTable
+          <EuiInMemoryTable
             columns={this.managedIndicesColumns(isDataStreamColumnVisible)}
             isSelectable={true}
             itemId="index"
@@ -462,10 +457,11 @@ export default class ManagedIndices extends Component<ManagedIndicesProps, Manag
                 resetFilters={this.resetFilters}
               />
             }
-            onChange={this.onTableChange}
+            search={searchControl}
             pagination={pagination}
             selection={selection}
             sorting={sorting}
+            childrenBetween={<EuiHorizontalRule margin="xs" />}
           />
         </ContentPanel>
       </div>

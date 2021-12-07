@@ -14,3 +14,15 @@ export const DEFAULT_QUERY_PARAMS: ManagedIndicesQueryParams = {
   sortDirection: "desc",
   showDataStreams: false,
 };
+
+export const SEARCH_SCHEMA = {
+  strict: true,
+  fields: {
+    indices: {
+      type: "string",
+    },
+    data_streams: {
+      type: "string",
+    },
+  },
+};
