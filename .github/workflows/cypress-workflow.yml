@@ -8,8 +8,8 @@ on:
       - main
       - development-*
 env:
-  OPENSEARCH_DASHBOARDS_VERSION: '1.x'
-  OPENSEARCH_VERSION: '1.3.0-SNAPSHOT'
+  OPENSEARCH_DASHBOARDS_VERSION: 'main'
+  OPENSEARCH_VERSION: 'main'
 jobs:
   tests:
     name: Run Cypress E2E tests
